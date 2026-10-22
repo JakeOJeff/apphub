@@ -1,59 +1,55 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ChevronLeft, ChevronRight, Database, Loader2, RefreshCw, Search, Table2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Database, KeyRound, Loader2, RefreshCw, Search, Table2 } from 'lucide-react'
 import { useAppState } from '../state/AppState'
-import { getClient, testConnection } from '../lib/supabase'
+import { api, type Rows } from '../lib/api'
 import { cn } from '../lib/format'
 import { Button, Card, EmptyBlock, inputCls } from '../components/ui'
 import { connectionBadge } from './Apps'
 
-const PAGE = 25
-
-type Rows = { rows: Record<string, unknown>[]; count: number | null; error?: string }
+/** Pseudo-table for Supabase Auth users (auth.admin.listUsers), like goumi-web's Users page. */
+const AUTH_USERS = '__auth_users__'
 
 export function DatabasePage() {
-  const { app, updateApp, setAppEditor, toast } = useAppState()
-  const conn = app.supabase
-  const [tables, setTables] = useState<string[]>(conn?.tables ?? [])
+  const { app, setAppEditor, recheckApp, toast } = useAppState()
+  const server = app.server
+  const tables = server?.lastCheck?.tables ?? []
   const [filter, setFilter] = useState('')
   const [manual, setManual] = useState('')
   const [table, setTable] = useState<string | null>(null)
   const [page, setPage] = useState(0)
-  const [data, setData] = useState<Rows | null>(null)
+  const [data, setData] = useState<(Rows & { error?: string }) | null>(null)
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
 
-  // Reset when switching apps; keep the table list in sync with saved connection.
   useEffect(() => {
     setTable(null)
     setData(null)
     setPage(0)
   }, [app.id])
-  useEffect(() => {
-    setTables(app.supabase?.tables ?? [])
-  }, [app.supabase?.tables])
 
   const refreshTables = async () => {
-    if (!conn) return
     setRefreshing(true)
-    const r = await testConnection(conn.url, conn.key)
-    setRefreshing(false)
-    if (!r.ok) return toast(r.error)
-    setTables(r.tables)
-    updateApp(app.id, { supabase: { ...conn, tables: r.tables, verifiedAt: new Date().toISOString() } })
-    toast(r.schemaExposed ? `${r.tables.length} tables` : 'Schema not exposed. Open tables by name')
+    try {
+      const a = await recheckApp(app.id)
+      toast(`${a.server?.lastCheck?.tables.length ?? 0} tables`)
+    } catch (e) {
+      toast((e as Error).message)
+    } finally {
+      setRefreshing(false)
+    }
   }
 
   const load = useCallback(async () => {
-    if (!conn || !table) return
+    if (!server || !table) return
     setLoading(true)
-    const from = page * PAGE
-    const { data: rows, count, error } = await getClient(app.id, conn)
-      .from(table)
-      .select('*', { count: 'exact' })
-      .range(from, from + PAGE - 1)
-    setLoading(false)
-    setData(error ? { rows: [], count: null, error: error.message } : { rows: rows ?? [], count })
-  }, [app.id, conn, table, page])
+    try {
+      setData(table === AUTH_USERS ? await api.authUsers(server.id, page) : await api.tableRows(server.id, table, page))
+    } catch (e) {
+      setData({ rows: [], count: null, pageSize: 25, error: (e as Error).message })
+    } finally {
+      setLoading(false)
+    }
+  }, [server, table, page])
 
   useEffect(() => {
     load()
@@ -73,10 +69,10 @@ export function DatabasePage() {
           {connectionBadge(app)}
         </div>
         <p className="mt-1 text-[13px] text-muted">
-          {conn ? `Browsing ${conn.url.replace(/^https:\/\//, '')} as the public role. Row Level Security applies.` : `Read ${app.name}’s Supabase tables.`}
+          {server ? `${server.sources.supabase.url.replace(/^https?:\/\//, '')} · read on the apphub server with the secret key (RLS bypassed).` : `Read ${app.name}’s Supabase tables.`}
         </p>
       </div>
-      {conn && (
+      {server && (
         <Button onClick={refreshTables} disabled={refreshing}>
           {refreshing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Refresh tables
         </Button>
@@ -84,19 +80,15 @@ export function DatabasePage() {
     </div>
   )
 
-  if (!conn) {
+  if (!server) {
     return (
       <div>
         {header}
         <div className="mt-6">
           <EmptyBlock
-            title={app.demo ? `${app.name} is a demo app` : `${app.name} isn’t connected yet`}
-            body={app.demo ? 'Demo apps use generated numbers and have no database. Add your own app with its Supabase URL and key.' : 'Add the project URL and publishable key to browse its tables here.'}
-            action={
-              <Button variant="primary" onClick={() => setAppEditor(app.demo ? 'new' : app.id)}>
-                {app.demo ? 'Add app' : 'Connect Supabase'}
-              </Button>
-            }
+            title={`${app.name} is a demo app`}
+            body="Demo apps use generated numbers and have no database. Add your own app with its Supabase sources to browse real data."
+            action={<Button variant="primary" onClick={() => setAppEditor('new')}>Add app</Button>}
           />
         </div>
       </div>
@@ -105,7 +97,20 @@ export function DatabasePage() {
 
   const visible = tables.filter((t) => t.toLowerCase().includes(filter.toLowerCase()))
   const columns = data?.rows.length ? Object.keys(data.rows[0]) : []
-  const pages = data?.count != null ? Math.max(1, Math.ceil(data.count / PAGE)) : 1
+  const pageSize = data?.pageSize ?? 25
+  const pages = data?.count != null ? Math.max(1, Math.ceil(data.count / pageSize)) : 1
+  const title = table === AUTH_USERS ? 'auth.users' : table
+
+  const navButton = (t: string, label: string, icon: React.ReactNode) => (
+    <button
+      key={t}
+      onClick={() => open(t)}
+      className={cn('flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left font-mono text-xs', t === table ? 'bg-hover text-fg' : 'text-muted hover:bg-hover hover:text-fg')}
+    >
+      {icon}
+      <span className="truncate">{label}</span>
+    </button>
+  )
 
   return (
     <div>
@@ -119,29 +124,12 @@ export function DatabasePage() {
             </div>
           </div>
           <div className="flex-1 overflow-y-auto p-1">
-            {visible.map((t) => (
-              <button
-                key={t}
-                onClick={() => open(t)}
-                className={cn('flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left font-mono text-xs', t === table ? 'bg-hover text-fg' : 'text-muted hover:bg-hover hover:text-fg')}
-              >
-                <Table2 size={12} className="shrink-0 text-subtle" />
-                <span className="truncate">{t}</span>
-              </button>
-            ))}
-            {tables.length === 0 && (
-              <div className="px-2 py-4 text-xs text-subtle">
-                No table list. Your project may not expose its schema to public keys. Open a table by name below.
-              </div>
-            )}
+            {navButton(AUTH_USERS, `auth.users${server.lastCheck?.authUsers != null ? ` (${server.lastCheck.authUsers.toLocaleString()})` : ''}`, <KeyRound size={12} className="shrink-0 text-violet-400" />)}
+            <div className="my-1 h-px bg-line" />
+            {visible.map((t) => navButton(t, t, <Table2 size={12} className="shrink-0 text-subtle" />))}
+            {tables.length === 0 && <div className="px-2 py-4 text-xs text-subtle">No tables found. Press Refresh tables, or open one by name below.</div>}
           </div>
-          <form
-            className="flex gap-1.5 border-t border-line p-2"
-            onSubmit={(e) => {
-              e.preventDefault()
-              if (manual.trim()) open(manual.trim())
-            }}
-          >
+          <form className="flex gap-1.5 border-t border-line p-2" onSubmit={(e) => { e.preventDefault(); if (manual.trim()) open(manual.trim()) }}>
             <input value={manual} onChange={(e) => setManual(e.target.value)} placeholder="table name" className={cn(inputCls, 'h-7 font-mono text-xs')} />
             <Button size="sm" type="submit" disabled={!manual.trim()}>Open</Button>
           </form>
@@ -152,12 +140,12 @@ export function DatabasePage() {
             <div className="flex flex-col items-center justify-center px-6 py-20 text-center">
               <Database size={20} className="text-subtle" />
               <div className="mt-2 text-sm font-semibold">Pick a table</div>
-              <div className="mt-1 text-xs text-subtle">Rows load live from Supabase, {PAGE} at a time.</div>
+              <div className="mt-1 text-xs text-subtle">Rows load live from Supabase, {pageSize} at a time.</div>
             </div>
           ) : (
             <>
               <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3">
-                <span className="font-mono text-[13px] font-semibold">{table}</span>
+                <span className="font-mono text-[13px] font-semibold">{title}</span>
                 {data?.count != null && <span className="text-xs text-subtle">{data.count.toLocaleString()} rows</span>}
                 {loading && <Loader2 size={13} className="animate-spin text-subtle" />}
                 <div className="ml-auto flex items-center gap-1">
@@ -171,9 +159,7 @@ export function DatabasePage() {
               {data?.error ? (
                 <div className="m-4 rounded-md border border-red-500/30 bg-red-500/8 px-3 py-2 text-xs text-red-500">{data.error}</div>
               ) : data && data.rows.length === 0 ? (
-                <div className="px-6 py-14 text-center text-xs text-subtle">
-                  No rows returned. If the table has data, a Row Level Security policy is probably hiding it from the public key.
-                </div>
+                <div className="px-6 py-14 text-center text-xs text-subtle">This table is empty.</div>
               ) : (
                 <div className="max-h-[calc(100vh-260px)] overflow-auto">
                   <table className="w-full text-xs">

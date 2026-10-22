@@ -55,11 +55,9 @@ export function GrowthLayout() {
       {!app.demo && (
         <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-card-2 px-3 py-2 text-xs text-muted">
           <Database size={13} className="text-subtle" />
-          {app.supabase
-            ? 'Supabase is connected. These metrics are still placeholders until your tables are mapped to them.'
-            : `${app.name} isn’t connected to Supabase yet. Metrics below are placeholders.`}
-          <Link to={app.supabase ? '/database' : '/apps'} className="ml-auto font-medium text-fg hover:underline">
-            {app.supabase ? 'Browse tables →' : 'Connect →'}
+          Data sources are connected. These metrics are still placeholders until your tables are mapped to them.
+          <Link to="/database" className="ml-auto font-medium text-fg hover:underline">
+            Browse tables →
           </Link>
         </div>
       )}

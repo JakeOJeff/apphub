@@ -1,13 +1,14 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { Check, ChevronsUpDown, Plus, Search, Settings2, Sparkles } from 'lucide-react'
 import type { AppInfo } from '../../data/mock'
+import { requiredPassed } from '../../shared/sources'
 import { useAppState } from '../../state/AppState'
 import { cn } from '../../lib/format'
 import { AppIcon, Menu, MenuItem } from '../ui'
 import { contentNav, mainNav, type NavItem } from './nav'
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
-  const { apps, app, setAppId, setAppEditor, setPaletteOpen, setAiOpen, toast } = useAppState()
+  const { apps, app, setAppId, setAppEditor, signOut, setPaletteOpen, setAiOpen, toast } = useAppState()
   const navigate = useNavigate()
 
   return (
@@ -55,7 +56,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                   <AppIcon app={a} size={20} />
                   <div className="min-w-0 flex-1 leading-tight">
                     <div className="truncate text-[13px]">{a.name}</div>
-                    <div className="flex items-center gap-1 truncate text-[10px] text-subtle"><StatusDot app={a} />{a.demo ? 'Demo' : a.supabase ? 'Supabase' : 'Not connected'}</div>
+                    <div className="flex items-center gap-1 truncate text-[10px] text-subtle"><StatusDot app={a} />{a.demo ? 'Demo' : 'Supabase'}</div>
                   </div>
                   {a.id === app.id && <Check size={14} className="text-fg" />}
                 </button>
@@ -130,9 +131,10 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       >
         {(close) => (
           <>
-            {['Profile', 'Switch to Sandbox', 'Team settings', 'Sign out'].map((l) => (
+            {['Profile', 'Team settings'].map((l) => (
               <MenuItem key={l} onClick={() => { close(); toast(l) }}>{l}</MenuItem>
             ))}
+            <MenuItem onClick={() => { close(); signOut().catch(() => {}) }}>Sign out</MenuItem>
           </>
         )}
       </Menu>
@@ -161,6 +163,7 @@ function NavRow({ item, onNavigate }: { item: NavItem; onNavigate?: () => void }
 }
 
 function StatusDot({ app }: { app: AppInfo }) {
-  const tone = app.demo ? 'bg-zinc-500' : !app.supabase ? 'bg-amber-500' : app.supabase.verifiedAt ? 'bg-emerald-500' : 'bg-blue-500'
+  const r = app.server?.lastCheck
+  const tone = app.demo ? 'bg-zinc-500' : !r ? 'bg-blue-500' : requiredPassed(r) ? 'bg-emerald-500' : 'bg-red-500'
   return <span className={cn('inline-block h-1.5 w-1.5 shrink-0 rounded-full', tone)} />
 }

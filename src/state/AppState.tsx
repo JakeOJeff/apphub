@@ -1,5 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { demoApps, type AppInfo, type RangeKey } from '../data/mock'
+import { api, type AppFields } from '../lib/api'
+import type { ServerApp, SourcesInput } from '../shared/sources'
 
 type Toast = { id: number; message: string }
 
@@ -7,9 +9,17 @@ type State = {
   apps: AppInfo[]
   app: AppInfo
   setAppId: (id: string) => void
-  addApp: (app: Omit<AppInfo, 'id' | 'scale'>) => AppInfo
-  updateApp: (id: string, patch: Partial<AppInfo>) => void
-  removeApp: (id: string) => void
+  auth: 'checking' | 'signed-out' | 'signed-in'
+  signIn: (password: string) => Promise<void>
+  signOut: () => Promise<void>
+  /** null until the server answers; set if it can't be reached. */
+  appsError: string | null
+  appsLoaded: boolean
+  createApp: (fields: AppFields & { sources: SourcesInput }) => Promise<AppInfo>
+  saveApp: (id: string, patch: Partial<AppFields> & { sources?: SourcesInput }) => Promise<void>
+  deleteApp: (id: string) => Promise<void>
+  recheckApp: (id: string) => Promise<AppInfo>
+  hideDemo: (id: string) => void
   /** null = closed, 'new' = add flow, otherwise the id of the app being edited. */
   appEditor: string | null
   setAppEditor: (v: string | null) => void
@@ -27,27 +37,17 @@ type State = {
 
 const Ctx = createContext<State | null>(null)
 
-const APPS_KEY = 'pyn.apps'
+const HIDDEN_DEMOS_KEY = 'pyn.hiddenDemos'
 
-// Credentials live in this browser's localStorage for now. Only public (anon/publishable)
-// keys are accepted, so this is the same exposure as shipping them in your app.
-// Move to a server-side store once there is a backend.
-function loadApps(): AppInfo[] {
-  try {
-    const raw = localStorage.getItem(APPS_KEY)
-    if (raw) {
-      const parsed = JSON.parse(raw) as AppInfo[]
-      if (Array.isArray(parsed)) return parsed
-    }
-  } catch {
-    /* ignore */
-  }
-  return demoApps
-}
+// Real apps (and their encrypted data sources) live on the apphub server, see server/.
+// Only the demo apps and UI preferences stay in localStorage.
+// Sample apps only show in local development, never on the deployed site.
+const SHOW_DEMOS = import.meta.env.DEV
 
-function slug(name: string) {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'app'
-}
+/** Stand-in when there are no apps yet; AppShell shows onboarding instead of pages. */
+const noApp: AppInfo = { id: 'none', name: 'No apps yet', color: '#52525b', platforms: '', scale: 0, demo: true }
+
+const fromServer = (a: ServerApp): AppInfo => ({ id: a.id, name: a.name, color: a.color, platforms: a.platforms, scale: 0.3, server: a })
 
 function load<T extends string>(key: string, fallback: T): T {
   try {
@@ -58,7 +58,12 @@ function load<T extends string>(key: string, fallback: T): T {
 }
 
 export function AppStateProvider({ children }: { children: ReactNode }) {
-  const [apps, setApps] = useState<AppInfo[]>(loadApps)
+  const [serverApps, setServerApps] = useState<ServerApp[]>([])
+  const [appsLoaded, setAppsLoaded] = useState(false)
+  const [appsError, setAppsError] = useState<string | null>(null)
+  const [hiddenDemos, setHiddenDemos] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(HIDDEN_DEMOS_KEY) ?? '[]') } catch { return [] }
+  })
   const [appEditor, setAppEditor] = useState<string | null>(null)
   const [appId, setAppIdRaw] = useState<string>(() => load('pyn.app', 'goumi'))
   const [range, setRange] = useState<RangeKey>('30d')
@@ -77,23 +82,63 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     try { localStorage.setItem('pyn.app', id) } catch { /* ignore */ }
   }, [])
 
+  const [auth, setAuth] = useState<State['auth']>('checking')
+
+  const loadApps = useCallback(() => {
+    api.listApps()
+      .then((a) => { setServerApps(a); setAppsError(null) })
+      .catch((e: Error) => setAppsError(e.message))
+      .finally(() => setAppsLoaded(true))
+  }, [])
+
   useEffect(() => {
-    try { localStorage.setItem(APPS_KEY, JSON.stringify(apps)) } catch { /* ignore */ }
-  }, [apps])
+    api.me()
+      .then((m) => {
+        setAuth(m.authenticated ? 'signed-in' : 'signed-out')
+        if (m.authenticated) loadApps()
+      })
+      .catch((e: Error) => { setAuth('signed-in'); setAppsError(e.message); setAppsLoaded(true) })
+    const onSignedOut = () => setAuth('signed-out')
+    window.addEventListener('apphub:signed-out', onSignedOut)
+    return () => window.removeEventListener('apphub:signed-out', onSignedOut)
+  }, [loadApps])
 
-  const addApp = useCallback((input: Omit<AppInfo, 'id' | 'scale'>) => {
-    const app: AppInfo = { ...input, id: `${slug(input.name)}-${Math.random().toString(36).slice(2, 6)}`, scale: 0.3 }
-    setApps((a) => [...a, app])
-    return app
+  const signIn = useCallback(async (password: string) => {
+    await api.login(password)
+    setAuth('signed-in')
+    loadApps()
+  }, [loadApps])
+
+  const signOut = useCallback(async () => {
+    await api.logout()
+    setServerApps([])
+    setAuth('signed-out')
   }, [])
 
-  const updateApp = useCallback((id: string, patch: Partial<AppInfo>) => {
-    setApps((a) => a.map((x) => (x.id === id ? { ...x, ...patch } : x)))
+  const upsert = useCallback((a: ServerApp) => {
+    setServerApps((list) => (list.some((x) => x.id === a.id) ? list.map((x) => (x.id === a.id ? a : x)) : [...list, a]))
+    return fromServer(a)
   }, [])
 
-  const removeApp = useCallback((id: string) => {
-    setApps((a) => a.filter((x) => x.id !== id))
+  const createApp = useCallback(async (fields: AppFields & { sources: SourcesInput }) => upsert(await api.createApp(fields)), [upsert])
+  const saveApp = useCallback(async (id: string, patch: Partial<AppFields> & { sources?: SourcesInput }) => { upsert(await api.updateApp(id, patch)) }, [upsert])
+  const recheckApp = useCallback(async (id: string) => upsert(await api.recheck(id)), [upsert])
+  const deleteApp = useCallback(async (id: string) => {
+    await api.deleteApp(id)
+    setServerApps((list) => list.filter((x) => x.id !== id))
   }, [])
+  const hideDemo = useCallback((id: string) => {
+    setHiddenDemos((h) => {
+      const next = [...h, id]
+      try { localStorage.setItem(HIDDEN_DEMOS_KEY, JSON.stringify(next)) } catch { /* ignore */ }
+      return next
+    })
+  }, [])
+
+  const apps = useMemo(
+    () => [...(SHOW_DEMOS ? demoApps.filter((d) => !hiddenDemos.includes(d.id)) : []), ...serverApps.map(fromServer)],
+    [hiddenDemos, serverApps],
+  )
 
   const toast = useCallback((message: string) => {
     const id = Date.now() + Math.random()
@@ -115,11 +160,18 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const value = useMemo<State>(
     () => ({
       apps,
-      app: apps.find((a) => a.id === appId) ?? apps[0] ?? demoApps[0],
+      app: apps.find((a) => a.id === appId) ?? apps[0] ?? noApp,
+      auth,
+      signIn,
+      signOut,
       setAppId,
-      addApp,
-      updateApp,
-      removeApp,
+      appsError,
+      appsLoaded,
+      createApp,
+      saveApp,
+      deleteApp,
+      recheckApp,
+      hideDemo,
       appEditor,
       setAppEditor,
       range,
@@ -133,7 +185,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       aiOpen,
       setAiOpen,
     }),
-    [apps, appId, setAppId, addApp, updateApp, removeApp, appEditor, range, theme, toasts, toast, paletteOpen, aiOpen],
+    [apps, appId, auth, signIn, signOut, setAppId, appsError, appsLoaded, createApp, saveApp, deleteApp, recheckApp, hideDemo, appEditor, range, theme, toasts, toast, paletteOpen, aiOpen],
   )
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

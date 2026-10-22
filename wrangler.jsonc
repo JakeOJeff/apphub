@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "apphub",
+  "account_id": "e8802cdd4c0651debd5796101609ccc7",
+  "main": "server/worker.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // Built UI. /api/* goes to the Worker first; every other path falls back to index.html.
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "apphub",
+      "database_id": "c5cc6d1b-b16a-4769-a651-8389eb6c1866",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "routes": [{ "pattern": "pyn.garden", "custom_domain": true }],
+  "observability": { "enabled": true }
+  // Secrets (not in this file): ENCRYPTION_KEY, ADMIN_PASSWORD, SESSION_SECRET
+  //   npx wrangler secret put <NAME>
+}

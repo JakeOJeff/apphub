@@ -1,17 +1,9 @@
 // Placeholder data for the UI. Everything here is generated deterministically
 // so numbers stay stable between renders. Replace with real API calls later.
 
-export type RangeKey = 'today' | '7d' | '30d' | '90d' | 'custom'
+import type { ServerApp } from '../shared/sources'
 
-export type SupabaseConnection = {
-  url: string
-  /** Public key only: legacy `anon` JWT or `sb_publishable_…`. Never a service_role / secret key. */
-  key: string
-  /** ISO time of the last successful connection test. */
-  verifiedAt?: string
-  /** Tables seen when the connection was last tested (empty if the schema isn't exposed). */
-  tables?: string[]
-}
+export type RangeKey = 'today' | '7d' | '30d' | '90d' | 'custom'
 
 export type AppInfo = {
   id: string
@@ -23,7 +15,8 @@ export type AppInfo = {
   scale: number
   /** Built-in sample apps; they have no backend. */
   demo?: boolean
-  supabase?: SupabaseConnection
+  /** Real apps: masked data sources and the last check, from the apphub server. */
+  server?: ServerApp
 }
 
 export const demoApps: AppInfo[] = [

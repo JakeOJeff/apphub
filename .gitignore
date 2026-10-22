@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# apphub server data (encrypted app sources + key)
+.data
+.env
+.dev.vars
+.wrangler

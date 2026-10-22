@@ -1,19 +1,22 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Database, Loader2, Pencil, Plus, RefreshCw } from 'lucide-react'
+import { Database, EyeOff, Loader2, Pencil, Plus, RefreshCw, ServerCrash } from 'lucide-react'
 import type { AppInfo } from '../data/mock'
 import { useAppState } from '../state/AppState'
-import { maskKey, testConnection } from '../lib/supabase'
+import { providers, requiredPassed } from '../shared/sources'
 import { AppIcon, Badge, Button, Card } from '../components/ui'
+import { CheckList } from '../components/CheckList'
 
 export function connectionBadge(app: AppInfo) {
   if (app.demo) return <Badge>Demo data</Badge>
-  if (!app.supabase) return <Badge tone="amber">Not connected</Badge>
-  if (!app.supabase.verifiedAt) return <Badge tone="blue">Untested</Badge>
+  const r = app.server?.lastCheck
+  if (!r) return <Badge tone="blue">Not checked</Badge>
+  if (!requiredPassed(r)) return <Badge tone="red">Sources failing</Badge>
+  if (r.checks.some((c) => c.status === 'error' || c.status === 'warning')) return <Badge tone="amber">Needs attention</Badge>
   return <Badge tone="green">Connected</Badge>
 }
 
-function timeAgo(iso?: string) {
+export function timeAgo(iso?: string) {
   if (!iso) return 'never'
   const s = (Date.now() - new Date(iso).getTime()) / 1000
   if (s < 60) return 'just now'
@@ -23,21 +26,19 @@ function timeAgo(iso?: string) {
 }
 
 export function AppsPage() {
-  const { apps, setAppEditor, setAppId, updateApp, toast } = useAppState()
+  const { apps, appsError, appsLoaded, setAppEditor, setAppId, recheckApp, hideDemo, toast } = useAppState()
   const navigate = useNavigate()
-  const [testing, setTesting] = useState<string | null>(null)
+  const [checking, setChecking] = useState<string | null>(null)
 
-  const retest = async (app: AppInfo) => {
-    if (!app.supabase) return
-    setTesting(app.id)
-    const r = await testConnection(app.supabase.url, app.supabase.key)
-    setTesting(null)
-    if (r.ok) {
-      updateApp(app.id, { supabase: { ...app.supabase, verifiedAt: new Date().toISOString(), tables: r.tables } })
-      toast(`${app.name}: connected${r.schemaExposed ? ` · ${r.tables.length} tables` : ''}`)
-    } else {
-      updateApp(app.id, { supabase: { ...app.supabase, verifiedAt: undefined } })
-      toast(`${app.name}: ${r.error}`)
+  const recheck = async (a: AppInfo) => {
+    setChecking(a.id)
+    try {
+      const next = await recheckApp(a.id)
+      toast(next.server?.lastCheck && requiredPassed(next.server.lastCheck) ? `${a.name}: sources OK` : `${a.name}: some sources failed`)
+    } catch (e) {
+      toast((e as Error).message)
+    } finally {
+      setChecking(null)
     }
   }
 
@@ -46,71 +47,77 @@ export function AppsPage() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Apps</h1>
-          <p className="mt-1 text-[13px] text-muted">Each app connects to its own Supabase project. Pyn reads it with the project’s publishable key.</p>
+          <p className="mt-1 text-[13px] text-muted">Each app brings its own data sources. Secrets stay encrypted on the apphub server.</p>
         </div>
-        <Button variant="primary" onClick={() => setAppEditor('new')}>
+        <Button variant="primary" onClick={() => setAppEditor('new')} disabled={!!appsError}>
           <Plus size={14} /> Add app
         </Button>
       </div>
 
-      <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {apps.map((a) => (
-          <Card key={a.id} className="flex flex-col p-4">
-            <div className="flex items-start gap-3">
-              <AppIcon app={a} size={36} />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="truncate text-[14px] font-semibold">{a.name}</span>
-                  {connectionBadge(a)}
-                </div>
-                <div className="text-xs text-subtle">{a.platforms || 'No platforms set'}</div>
-              </div>
-            </div>
+      {appsError && (
+        <div className="mt-4 flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/8 px-3 py-2 text-xs text-red-500">
+          <ServerCrash size={14} /> {appsError}
+        </div>
+      )}
 
-            <dl className="mt-4 space-y-1.5 text-xs">
-              {a.supabase ? (
+      <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {apps.map((a) => {
+          const s = a.server
+          const integrations = s ? providers.filter((p) => s.sources.integrations[p.id]).map((p) => p.name) : []
+          return (
+            <Card key={a.id} className="flex flex-col p-4">
+              <div className="flex items-start gap-3">
+                <AppIcon app={a} size={36} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-[14px] font-semibold">{a.name}</span>
+                    {connectionBadge(a)}
+                  </div>
+                  <div className="text-xs text-subtle">{a.platforms || 'No platforms set'}</div>
+                </div>
+              </div>
+
+              {s ? (
                 <>
-                  <Row k="Project" v={a.supabase.url.replace(/^https:\/\//, '')} />
-                  <Row k="Key" v={maskKey(a.supabase.key)} mono />
-                  <Row k="Last check" v={timeAgo(a.supabase.verifiedAt)} />
-                  <Row k="Tables" v={a.supabase.tables?.length ? String(a.supabase.tables.length) : '—'} />
+                  <dl className="mt-4 space-y-1.5 text-xs">
+                    <Row k="Supabase" v={s.sources.supabase.url.replace(/^https?:\/\//, '')} />
+                    <Row k="Publishable key" v={s.sources.supabase.anonKey} mono />
+                    <Row k="Secret key" v={s.sources.supabase.secretKey} mono />
+                    <Row k="Integrations" v={integrations.join(', ') || 'None'} />
+                    <Row k="Last check" v={timeAgo(s.lastCheck?.at)} />
+                  </dl>
+                  {s.lastCheck && (
+                    <div className="mt-3 border-t border-line pt-3">
+                      <CheckList report={s.lastCheck} hideUnconfigured />
+                    </div>
+                  )}
                 </>
               ) : (
-                <div className="py-2 text-subtle">{a.demo ? 'Sample app with generated numbers. No backend.' : 'Add a Supabase URL and key to read this app’s data.'}</div>
+                <div className="mt-4 py-2 text-xs text-subtle">Sample app with generated numbers. No data sources.</div>
               )}
-            </dl>
 
-            <div className="mt-auto flex flex-wrap gap-2 pt-4">
-              {!a.demo && (
-                <Button size="sm" onClick={() => setAppEditor(a.id)}>
-                  <Pencil size={12} /> {a.supabase ? 'Edit' : 'Connect'}
-                </Button>
-              )}
-              {a.supabase && (
-                <>
-                  <Button size="sm" variant="ghost" onClick={() => retest(a)} disabled={testing === a.id}>
-                    {testing === a.id ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} Test
-                  </Button>
-                  <Button size="sm" variant="ghost" onClick={() => { setAppId(a.id); navigate('/database') }}>
-                    <Database size={12} /> Database
-                  </Button>
-                </>
-              )}
-              {a.demo && (
-                <Button size="sm" variant="ghost" onClick={() => setAppEditor(a.id)}>
-                  <Pencil size={12} /> Edit / remove
-                </Button>
-              )}
-            </div>
-          </Card>
-        ))}
+              <div className="mt-auto flex flex-wrap gap-2 pt-4">
+                {s ? (
+                  <>
+                    <Button size="sm" onClick={() => setAppEditor(a.id)}><Pencil size={12} /> Edit sources</Button>
+                    <Button size="sm" variant="ghost" onClick={() => recheck(a)} disabled={checking === a.id}>
+                      {checking === a.id ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} Re-check
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => { setAppId(a.id); navigate('/database') }}><Database size={12} /> Database</Button>
+                  </>
+                ) : (
+                  <Button size="sm" variant="ghost" onClick={() => { hideDemo(a.id); toast(`${a.name} hidden`) }}><EyeOff size={12} /> Hide sample</Button>
+                )}
+              </div>
+            </Card>
+          )
+        })}
 
-        <button
-          onClick={() => setAppEditor('new')}
-          className="flex min-h-44 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-line text-sm text-muted hover:border-line-2 hover:text-fg"
-        >
-          <Plus size={18} /> Add app
-        </button>
+        {appsLoaded && !appsError && (
+          <button onClick={() => setAppEditor('new')} className="flex min-h-44 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-line text-sm text-muted hover:border-line-2 hover:text-fg">
+            <Plus size={18} /> Add app
+          </button>
+        )}
       </div>
     </div>
   )
@@ -119,7 +126,7 @@ export function AppsPage() {
 function Row({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
   return (
     <div className="flex justify-between gap-3">
-      <dt className="text-subtle">{k}</dt>
+      <dt className="shrink-0 text-subtle">{k}</dt>
       <dd className={mono ? 'truncate font-mono text-[11px]' : 'truncate'}>{v}</dd>
     </div>
   )

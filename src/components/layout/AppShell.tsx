@@ -1,5 +1,9 @@
 import { useState } from 'react'
-import { Outlet } from 'react-router-dom'
+import { Outlet, useLocation } from 'react-router-dom'
+import { Loader2 } from 'lucide-react'
+import { useAppState } from '../../state/AppState'
+import { SignIn } from '../../pages/SignIn'
+import { Welcome } from '../../pages/Welcome'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 import { AiPanel, CommandPalette, Toasts } from './Overlays'
@@ -7,6 +11,15 @@ import { AppEditor } from '../AppEditor'
 
 export function AppShell() {
   const [navOpen, setNavOpen] = useState(false)
+  const { auth, apps, appsLoaded } = useAppState()
+  const { pathname } = useLocation()
+
+  if (auth === 'checking') {
+    return <div className="grid h-full place-items-center text-subtle"><Loader2 size={18} className="animate-spin" /></div>
+  }
+  if (auth === 'signed-out') return <SignIn />
+
+  const needsFirstApp = appsLoaded && apps.length === 0 && pathname !== '/apps'
 
   return (
     <div className="flex min-h-full">
@@ -25,7 +38,7 @@ export function AppShell() {
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar onOpenNav={() => setNavOpen(true)} />
         <main className="mx-auto w-full max-w-[1280px] flex-1 px-4 py-6 md:px-6">
-          <Outlet />
+          {needsFirstApp ? <Welcome /> : <Outlet />}
         </main>
       </div>
 
