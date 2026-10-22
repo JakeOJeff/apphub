@@ -4,7 +4,16 @@ import { Button, Card } from '../components/ui'
 
 /** Shown instead of pages until the first app is added. */
 export function Welcome() {
-  const { setAppEditor, appsError } = useAppState()
+  const { setAppEditor, appsError, isOwner, me } = useAppState()
+  if (!isOwner) {
+    return (
+      <div className="mx-auto max-w-xl py-16 text-center">
+        <h1 className="text-2xl font-semibold tracking-tight">No apps shared with you yet</h1>
+        <p className="mt-2 text-[13px] text-muted">You’re signed in as {me?.email}. An owner can give you access to apps from the Team page.</p>
+        {appsError && <div className="mt-4 rounded-md border border-red-500/30 bg-red-500/8 px-3 py-2 text-xs text-red-500">{appsError}</div>}
+      </div>
+    )
+  }
   return (
     <div className="mx-auto max-w-xl py-16 text-center">
       <h1 className="text-2xl font-semibold tracking-tight">Add your first app</h1>

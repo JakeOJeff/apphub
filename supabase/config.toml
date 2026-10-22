@@ -1,0 +1,8 @@
+# Supabase project for apphub's own sign-in ("App Hub"). Only what's declared here is pushed:
+#   supabase config diff --project-ref jiynlnpbjzmndfyfazqo
+#   supabase config push --project-ref jiynlnpbjzmndfyfazqo
+project_id = "jiynlnpbjzmndfyfazqo"
+
+[auth]
+site_url = "https://pyn.garden"
+additional_redirect_urls = ["https://pyn.garden", "http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:8787"]

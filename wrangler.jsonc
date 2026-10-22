@@ -21,7 +21,12 @@
     }
   ],
   "routes": [{ "pattern": "pyn.garden", "custom_domain": true }],
-  "observability": { "enabled": true }
-  // Secrets (not in this file): ENCRYPTION_KEY, ADMIN_PASSWORD, SESSION_SECRET
+  "observability": { "enabled": true },
+  // Supabase Auth for apphub's own sign-in (the "App Hub" project). Both values are public.
+  "vars": {
+    "SUPABASE_URL": "https://jiynlnpbjzmndfyfazqo.supabase.co",
+    "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_6ohaPDZ_euZjcbG0nOU2yg__AHvzDrD"
+  }
+  // Secrets (not in this file): ENCRYPTION_KEY
   //   npx wrangler secret put <NAME>
 }

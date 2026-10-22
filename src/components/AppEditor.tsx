@@ -46,7 +46,7 @@ function fromServer(a: ServerApp): Draft {
 
 /** Add-app flow (2 steps) and edit dialog, driven by `appEditor` in app state. */
 export function AppEditor() {
-  const { apps, appEditor, setAppEditor, createApp, saveApp, deleteApp, setAppId, toast } = useAppState()
+  const { apps, appEditor, setAppEditor, createApp, saveApp, deleteApp, setAppId, toast, isOwner } = useAppState()
   const editing = appEditor && appEditor !== 'new' ? apps.find((a) => a.id === appEditor)?.server : undefined
   const isNew = appEditor === 'new'
 
@@ -286,7 +286,7 @@ export function AppEditor() {
       </>
     ) : (
       <>
-        <Button className="mr-auto" variant="ghost" onClick={() => setConfirmRemove(true)}>Remove app</Button>
+        {isOwner ? <Button className="mr-auto" variant="ghost" onClick={() => setConfirmRemove(true)}>Remove app</Button> : <span className="mr-auto" />}
         <Button onClick={close}>Cancel</Button>
         <Button variant="primary" onClick={save} disabled={!nameOk || saving || (!!sourcesTouched && !passed)}>
           {saving && <Loader2 size={14} className="animate-spin" />} Save

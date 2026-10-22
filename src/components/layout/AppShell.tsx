@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { useAppState } from '../../state/AppState'
-import { SignIn } from '../../pages/SignIn'
+import { NoAccess, ResetPassword, SignIn, usePasswordRecovery } from '../../pages/SignIn'
 import { Welcome } from '../../pages/Welcome'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
@@ -13,13 +13,16 @@ export function AppShell() {
   const [navOpen, setNavOpen] = useState(false)
   const { auth, apps, appsLoaded } = useAppState()
   const { pathname } = useLocation()
+  const [recovering, doneRecovering] = usePasswordRecovery()
 
   if (auth === 'checking') {
     return <div className="grid h-full place-items-center text-subtle"><Loader2 size={18} className="animate-spin" /></div>
   }
   if (auth === 'signed-out') return <SignIn />
+  if (recovering) return <ResetPassword onDone={doneRecovering} />
+  if (auth === 'no-access') return <NoAccess />
 
-  const needsFirstApp = appsLoaded && apps.length === 0 && pathname !== '/apps'
+  const needsFirstApp = appsLoaded && apps.length === 0 && pathname !== '/apps' && pathname !== '/team'
 
   return (
     <div className="flex min-h-full">

@@ -8,7 +8,9 @@ import { AppIcon, Menu, MenuItem } from '../ui'
 import { contentNav, mainNav, type NavItem } from './nav'
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
-  const { apps, app, setAppId, setAppEditor, signOut, setPaletteOpen, setAiOpen, toast } = useAppState()
+  const { apps, app, setAppId, setAppEditor, signOut, setPaletteOpen, setAiOpen, me, isOwner } = useAppState()
+  const name = me?.email ?? 'Local'
+  const roleLabel = !me ? 'Sign-in off' : me.role === 'owner' ? 'Owner' : `Member · ${Object.keys(me.apps).length} apps`
   const navigate = useNavigate()
 
   return (
@@ -49,7 +51,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                   onClick={() => {
                     setAppId(a.id)
                     close()
-                    toast(`Switched to ${a.name}`)
                   }}
                   className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-hover"
                 >
@@ -62,9 +63,11 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                 </button>
               ))}
               <div className="my-1 h-px bg-line" />
-              <MenuItem icon={<Plus size={14} />} onClick={() => { close(); onNavigate?.(); setAppEditor('new') }}>
-                Add app
-              </MenuItem>
+              {isOwner && (
+                <MenuItem icon={<Plus size={14} />} onClick={() => { close(); onNavigate?.(); setAppEditor('new') }}>
+                  Add app
+                </MenuItem>
+              )}
               <MenuItem icon={<Settings2 size={14} />} onClick={() => { close(); onNavigate?.(); navigate('/apps') }}>
                 Manage apps
               </MenuItem>
@@ -121,20 +124,18 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         width="w-[176px] ml-3"
         trigger={({ toggle }) => (
           <button onClick={toggle} className="flex w-full cursor-pointer items-center gap-2.5 border-t border-line px-4 py-3 text-left hover:bg-hover">
-            <span className="grid h-7 w-7 place-items-center rounded-full bg-violet-500 text-xs font-semibold text-white">F</span>
+            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-violet-500 text-xs font-semibold text-white uppercase">{name[0]}</span>
             <div className="min-w-0 leading-tight">
-              <div className="truncate text-[13px] font-medium">Finu</div>
-              <div className="truncate text-[11px] text-subtle">Owner · Production</div>
+              <div className="truncate text-[13px] font-medium">{name}</div>
+              <div className="truncate text-[11px] text-subtle">{roleLabel}</div>
             </div>
           </button>
         )}
       >
         {(close) => (
           <>
-            {['Profile', 'Team settings'].map((l) => (
-              <MenuItem key={l} onClick={() => { close(); toast(l) }}>{l}</MenuItem>
-            ))}
-            <MenuItem onClick={() => { close(); signOut().catch(() => {}) }}>Sign out</MenuItem>
+            {isOwner && <MenuItem onClick={() => { close(); onNavigate?.(); navigate('/team') }}>Team & access</MenuItem>}
+            {me && <MenuItem onClick={() => { close(); signOut().catch(() => {}) }}>Sign out</MenuItem>}
           </>
         )}
       </Menu>

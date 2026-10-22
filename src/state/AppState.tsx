@@ -1,6 +1,7 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { demoApps, type AppInfo, type RangeKey } from '../data/mock'
-import { api, type AppFields } from '../lib/api'
+import { api, ApiError, type AppFields, type Me } from '../lib/api'
+import { authClient } from '../lib/auth'
 import type { ServerApp, SourcesInput } from '../shared/sources'
 
 type Toast = { id: number; message: string }
@@ -9,8 +10,12 @@ type State = {
   apps: AppInfo[]
   app: AppInfo
   setAppId: (id: string) => void
-  auth: 'checking' | 'signed-out' | 'signed-in'
-  signIn: (password: string) => Promise<void>
+  /** no-access: signed in to Supabase but not on the apphub team. */
+  auth: 'checking' | 'signed-out' | 'no-access' | 'signed-in'
+  /** The signed-in person and their roles; null when sign-in is off or not loaded. */
+  me: Me | null
+  isOwner: boolean
+  canEdit: (appId: string) => boolean
   signOut: () => Promise<void>
   /** null until the server answers; set if it can't be reached. */
   appsError: string | null
@@ -82,7 +87,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     try { localStorage.setItem('pyn.app', id) } catch { /* ignore */ }
   }, [])
 
-  const [auth, setAuth] = useState<State['auth']>('checking')
+  const [auth, setAuthRaw] = useState<State['auth']>('checking')
+  const authRef = useRef(auth)
+  const setAuth = useCallback((a: State['auth']) => { authRef.current = a; setAuthRaw(a) }, [])
+  const [me, setMe] = useState<Me | null>(null)
 
   const loadApps = useCallback(() => {
     api.listApps()
@@ -91,29 +99,51 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       .finally(() => setAppsLoaded(true))
   }, [])
 
+  const refreshMe = useCallback(async () => {
+    try {
+      const m = await api.me()
+      setMe(m.id === 'local' ? null : m)
+      setAuth('signed-in')
+      loadApps()
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) setAuth('signed-out')
+      else if (e instanceof ApiError && e.status === 403) setAuth('no-access')
+      else { setAuth('signed-in'); setAppsError((e as Error).message); setAppsLoaded(true) }
+    }
+  }, [loadApps, setAuth])
+
   useEffect(() => {
-    api.me()
-      .then((m) => {
-        setAuth(m.authenticated ? 'signed-in' : 'signed-out')
-        if (m.authenticated) loadApps()
+    let unsubscribe = () => {}
+    authClient()
+      .then((sb) => {
+        if (!sb) return
+        const { data } = sb.auth.onAuthStateChange((event) => {
+          // Deferred: supabase-js holds a lock during this callback, and refreshMe reads the session.
+          if (event === 'SIGNED_IN' && authRef.current !== 'signed-in') setTimeout(refreshMe)
+          if (event === 'SIGNED_OUT') { setMe(null); setServerApps([]); setAuth('signed-out') }
+        })
+        unsubscribe = () => data.subscription.unsubscribe()
       })
-      .catch((e: Error) => { setAuth('signed-in'); setAppsError(e.message); setAppsLoaded(true) })
+      .catch(() => {})
+    refreshMe()
     const onSignedOut = () => setAuth('signed-out')
     window.addEventListener('apphub:signed-out', onSignedOut)
-    return () => window.removeEventListener('apphub:signed-out', onSignedOut)
-  }, [loadApps])
-
-  const signIn = useCallback(async (password: string) => {
-    await api.login(password)
-    setAuth('signed-in')
-    loadApps()
-  }, [loadApps])
+    return () => {
+      unsubscribe()
+      window.removeEventListener('apphub:signed-out', onSignedOut)
+    }
+  }, [refreshMe, setAuth])
 
   const signOut = useCallback(async () => {
-    await api.logout()
+    await (await authClient())?.auth.signOut()
+    setMe(null)
     setServerApps([])
     setAuth('signed-out')
-  }, [])
+  }, [setAuth])
+
+  // With sign-in off (local dev) you can do everything.
+  const isOwner = !me || me.role === 'owner'
+  const canEdit = useCallback((id: string) => !me || me.role === 'owner' || me.apps[id] === 'editor', [me])
 
   const upsert = useCallback((a: ServerApp) => {
     setServerApps((list) => (list.some((x) => x.id === a.id) ? list.map((x) => (x.id === a.id ? a : x)) : [...list, a]))
@@ -162,7 +192,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       apps,
       app: apps.find((a) => a.id === appId) ?? apps[0] ?? noApp,
       auth,
-      signIn,
+      me,
+      isOwner,
+      canEdit,
       signOut,
       setAppId,
       appsError,
@@ -185,7 +217,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       aiOpen,
       setAiOpen,
     }),
-    [apps, appId, auth, signIn, signOut, setAppId, appsError, appsLoaded, createApp, saveApp, deleteApp, recheckApp, hideDemo, appEditor, range, theme, toasts, toast, paletteOpen, aiOpen],
+    [apps, appId, auth, me, isOwner, canEdit, signOut, setAppId, appsError, appsLoaded, createApp, saveApp, deleteApp, recheckApp, hideDemo, appEditor, range, theme, toasts, toast, paletteOpen, aiOpen],
   )
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

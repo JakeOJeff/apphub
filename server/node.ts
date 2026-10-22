@@ -1,5 +1,6 @@
 // Local runtime: apps in .data/apps.json, encryption key from APPHUB_ENCRYPTION_KEY or .data/master.key.
-// No login locally; the API only answers localhost.
+// The API only answers localhost. Sign-in is on when APPHUB_SUPABASE_URL + APPHUB_SUPABASE_PUBLISHABLE_KEY are set
+// (.env.local), otherwise there's no login and you have owner access.
 import { randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -56,9 +57,11 @@ export const api = createApi(() => {
   deps ??= {
     store,
     encryptionKey: encryptionKey(),
-    auth: null,
+    auth:
+      process.env.APPHUB_SUPABASE_URL && process.env.APPHUB_SUPABASE_PUBLISHABLE_KEY
+        ? { supabaseUrl: process.env.APPHUB_SUPABASE_URL, supabaseKey: process.env.APPHUB_SUPABASE_PUBLISHABLE_KEY }
+        : null,
     allowedHosts: new Set(['localhost', '127.0.0.1', '[::1]']),
-    secureCookies: false,
   }
   return deps
 })

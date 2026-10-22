@@ -2,11 +2,11 @@
 // the way goumi-web's admin uses its service-role client.
 // Runtime-agnostic: server/node.ts (local) and server/worker.ts (Cloudflare) provide the deps.
 import { Hono, type Context } from 'hono'
-import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { mask, normalizeUrl, providers, requiredPassed, type CheckReport, type PublicSources, type ServerApp, type SourcesInput } from '../src/shared/sources.ts'
 import { runChecks } from './checks.ts'
-import { decrypt, encrypt, safeEqual, signSession, verifySession } from './crypto.ts'
+import { AuthError, canEdit, canView, localOwner, rpc, viewerFromToken, type AuthConfig, type Viewer } from './auth.ts'
+import { decrypt, encrypt } from './crypto.ts'
 
 export type StoredApp = {
   id: string
@@ -30,18 +30,15 @@ export type Deps = {
   store: AppStore
   /** Base64 32-byte AES key. */
   encryptionKey: string
-  /** When set, every API call needs a session from POST /api/auth/login. */
-  auth: { password: string; sessionSecret: string } | null
+  /** When set, every API call needs a Supabase Auth access token (Authorization: Bearer). Null = no login, full access. */
+  auth: AuthConfig | null
   /** When set, only these Host headers are answered (local mode). */
   allowedHosts: Set<string> | null
-  secureCookies: boolean
 }
 
-type Env = { Variables: { deps: Deps } }
+type Env = { Variables: { deps: Deps; viewer: Viewer } }
 
 const PAGE = 25
-const SESSION_COOKIE = 'pyn_session'
-const SESSION_TTL = 60 * 60 * 24 * 7
 
 export function createApi(getDeps: (c: Context) => Deps | Promise<Deps>) {
   const api = new Hono<Env>().basePath('/api')
@@ -60,39 +57,32 @@ export function createApi(getDeps: (c: Context) => Deps | Promise<Deps>) {
 
   // ---------- auth ----------
 
-  api.get('/auth/me', async (c) => {
+  /** Public: what the browser needs to start Supabase Auth. */
+  api.get('/auth/config', (c) => {
     const { auth } = c.get('deps')
-    if (!auth) return c.json({ required: false, authenticated: true })
-    return c.json({ required: true, authenticated: await verifySession(auth.sessionSecret, getCookie(c, SESSION_COOKIE)) })
-  })
-
-  api.post('/auth/login', async (c) => {
-    const { auth, secureCookies } = c.get('deps')
-    if (!auth) return c.json({ ok: true })
-    const { password } = (await c.req.json().catch(() => ({}))) as { password?: string }
-    if (!password || !safeEqual(password, auth.password)) {
-      await new Promise((r) => setTimeout(r, 800)) // slow down guessing
-      return c.json({ error: 'Wrong password' }, 401)
-    }
-    setCookie(c, SESSION_COOKIE, await signSession(auth.sessionSecret, SESSION_TTL), {
-      httpOnly: true,
-      secure: secureCookies,
-      sameSite: 'Strict',
-      path: '/',
-      maxAge: SESSION_TTL,
-    })
-    return c.json({ ok: true })
-  })
-
-  api.post('/auth/logout', (c) => {
-    deleteCookie(c, SESSION_COOKIE, { path: '/' })
-    return c.json({ ok: true })
+    return c.json(auth ? { required: true, supabaseUrl: auth.supabaseUrl, supabaseKey: auth.supabaseKey } : { required: false })
   })
 
   api.use('*', async (c, next) => {
     const { auth } = c.get('deps')
-    if (auth && !(await verifySession(auth.sessionSecret, getCookie(c, SESSION_COOKIE)))) return c.json({ error: 'Sign in required' }, 401)
+    if (!auth) {
+      c.set('viewer', localOwner)
+      return next()
+    }
+    const token = c.req.header('authorization')?.match(/^Bearer (.+)$/)?.[1]
+    if (!token) return c.json({ error: 'Sign in required' }, 401)
+    try {
+      c.set('viewer', await viewerFromToken(auth, token))
+    } catch (e) {
+      if (e instanceof AuthError) return c.json({ error: e.message }, e.status)
+      throw e
+    }
     await next()
+  })
+
+  api.get('/auth/me', (c) => {
+    const { id, email, role, apps } = c.get('viewer')
+    return c.json({ id, email, role, apps })
   })
 
   // ---------- helpers ----------
@@ -121,20 +111,26 @@ export function createApi(getDeps: (c: Context) => Deps | Promise<Deps>) {
 
   // ---------- apps ----------
 
+  const owner = (c: Context<Env>) => c.get('viewer').role === 'owner'
+  const forbidden = (c: Context<Env>) => c.json({ error: 'You don’t have access to do that' }, 403)
+
   api.get('/apps', async (c) => {
-    const apps = await c.get('deps').store.list()
+    const viewer = c.get('viewer')
+    const apps = (await c.get('deps').store.list()).filter((a) => canView(viewer, a.id))
     return c.json(await Promise.all(apps.map((a) => toPublic(c, a))))
   })
 
   /** Check sources without saving (add flow). For an existing app pass appId to fill in saved secrets. */
   api.post('/apps/check', async (c) => {
     const body = (await c.req.json()) as { sources: SourcesInput; appId?: string }
+    if (body.appId ? !canEdit(c.get('viewer'), body.appId) : !owner(c)) return forbidden(c)
     const saved = body.appId ? await c.get('deps').store.get(body.appId) : undefined
     const sources = saved ? merge(await open(c, saved), body.sources) : clean(body.sources)
     return c.json(await runChecks(sources))
   })
 
   api.post('/apps', async (c) => {
+    if (!owner(c)) return forbidden(c)
     const body = (await c.req.json()) as { name: string; color: string; platforms: string; sources: SourcesInput }
     if (!body.name?.trim()) return c.json({ error: 'Name is required' }, 400)
     const sources = clean(body.sources)
@@ -154,6 +150,7 @@ export function createApi(getDeps: (c: Context) => Deps | Promise<Deps>) {
   })
 
   api.patch('/apps/:id', async (c) => {
+    if (!canEdit(c.get('viewer'), c.req.param('id'))) return forbidden(c)
     const { store } = c.get('deps')
     const current = await store.get(c.req.param('id'))
     if (!current) return c.json({ error: 'Not found' }, 404)
@@ -174,12 +171,16 @@ export function createApi(getDeps: (c: Context) => Deps | Promise<Deps>) {
   })
 
   api.delete('/apps/:id', async (c) => {
-    await c.get('deps').store.delete(c.req.param('id'))
+    if (!owner(c)) return forbidden(c)
+    const { store, auth } = c.get('deps')
+    await store.delete(c.req.param('id'))
+    if (auth) await rpc(auth, c.get('viewer').token, 'forget_app', { target_app: c.req.param('id') })
     return c.body(null, 204)
   })
 
   /** Re-run checks with the saved sources. */
   api.post('/apps/:id/check', async (c) => {
+    if (!canEdit(c.get('viewer'), c.req.param('id'))) return forbidden(c)
     const { store } = c.get('deps')
     const a = await store.get(c.req.param('id'))
     if (!a) return c.json({ error: 'Not found' }, 404)
@@ -191,6 +192,7 @@ export function createApi(getDeps: (c: Context) => Deps | Promise<Deps>) {
   // ---------- data (service role, like goumi-web's createAdminClient) ----------
 
   api.get('/apps/:id/tables/:table', async (c) => {
+    if (!canView(c.get('viewer'), c.req.param('id'))) return forbidden(c)
     const a = await c.get('deps').store.get(c.req.param('id'))
     if (!a) return c.json({ error: 'Not found' }, 404)
     const table = c.req.param('table')
@@ -206,6 +208,7 @@ export function createApi(getDeps: (c: Context) => Deps | Promise<Deps>) {
   })
 
   api.get('/apps/:id/auth-users', async (c) => {
+    if (!canView(c.get('viewer'), c.req.param('id'))) return forbidden(c)
     const a = await c.get('deps').store.get(c.req.param('id'))
     if (!a) return c.json({ error: 'Not found' }, 404)
     const page = Math.max(0, Number(c.req.query('page') ?? 0) || 0)

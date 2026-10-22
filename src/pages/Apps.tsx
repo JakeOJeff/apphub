@@ -26,7 +26,7 @@ export function timeAgo(iso?: string) {
 }
 
 export function AppsPage() {
-  const { apps, appsError, appsLoaded, setAppEditor, setAppId, recheckApp, hideDemo, toast } = useAppState()
+  const { apps, appsError, appsLoaded, setAppEditor, setAppId, recheckApp, hideDemo, toast, isOwner, canEdit } = useAppState()
   const navigate = useNavigate()
   const [checking, setChecking] = useState<string | null>(null)
 
@@ -49,9 +49,11 @@ export function AppsPage() {
           <h1 className="text-xl font-semibold tracking-tight">Apps</h1>
           <p className="mt-1 text-[13px] text-muted">Each app brings its own data sources. Secrets stay encrypted on the apphub server.</p>
         </div>
-        <Button variant="primary" onClick={() => setAppEditor('new')} disabled={!!appsError}>
-          <Plus size={14} /> Add app
-        </Button>
+        {isOwner && (
+          <Button variant="primary" onClick={() => setAppEditor('new')} disabled={!!appsError}>
+            <Plus size={14} /> Add app
+          </Button>
+        )}
       </div>
 
       {appsError && (
@@ -99,10 +101,14 @@ export function AppsPage() {
               <div className="mt-auto flex flex-wrap gap-2 pt-4">
                 {s ? (
                   <>
-                    <Button size="sm" onClick={() => setAppEditor(a.id)}><Pencil size={12} /> Edit sources</Button>
-                    <Button size="sm" variant="ghost" onClick={() => recheck(a)} disabled={checking === a.id}>
-                      {checking === a.id ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} Re-check
-                    </Button>
+                    {canEdit(a.id) && (
+                      <>
+                        <Button size="sm" onClick={() => setAppEditor(a.id)}><Pencil size={12} /> Edit sources</Button>
+                        <Button size="sm" variant="ghost" onClick={() => recheck(a)} disabled={checking === a.id}>
+                          {checking === a.id ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} Re-check
+                        </Button>
+                      </>
+                    )}
                     <Button size="sm" variant="ghost" onClick={() => { setAppId(a.id); navigate('/database') }}><Database size={12} /> Database</Button>
                   </>
                 ) : (
@@ -113,7 +119,7 @@ export function AppsPage() {
           )
         })}
 
-        {appsLoaded && !appsError && (
+        {appsLoaded && !appsError && isOwner && (
           <button onClick={() => setAppEditor('new')} className="flex min-h-44 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-line text-sm text-muted hover:border-line-2 hover:text-fg">
             <Plus size={18} /> Add app
           </button>

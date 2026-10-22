@@ -1,4 +1,4 @@
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { AppWindow, Bell, Link2, Megaphone, Menu as MenuIcon, Moon, Plus, Search, Sun, TicketPercent, UserPlus } from 'lucide-react'
 import { notifications } from '../../data/mock'
 import { useAppState } from '../../state/AppState'
@@ -6,9 +6,10 @@ import { Button, Menu, MenuItem } from '../ui'
 import { allNav } from './nav'
 
 export function Topbar({ onOpenNav }: { onOpenNav: () => void }) {
-  const { theme, toggleTheme, setPaletteOpen, setAppEditor, toast } = useAppState()
+  const { theme, toggleTheme, setPaletteOpen, setAppEditor, toast, isOwner } = useAppState()
   const { pathname } = useLocation()
-  const crumb = allNav.find((n) => pathname.startsWith(n.to))?.label ?? 'Home'
+  const navigate = useNavigate()
+  const crumb = allNav.find((n) => pathname.startsWith(n.to))?.label ?? (pathname.startsWith('/team') ? 'Team' : 'Home')
 
   return (
     <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b border-line bg-bg/85 px-4 backdrop-blur md:px-6">
@@ -35,11 +36,11 @@ export function Topbar({ onOpenNav }: { onOpenNav: () => void }) {
         >
           {(close) => (
             <>
-              <MenuItem icon={<AppWindow size={14} />} onClick={() => { close(); setAppEditor('new') }}>App</MenuItem>
+              {isOwner && <MenuItem icon={<AppWindow size={14} />} onClick={() => { close(); setAppEditor('new') }}>App</MenuItem>}
               <MenuItem icon={<Link2 size={14} />} onClick={() => { close(); toast('New link') }}>Link</MenuItem>
               <MenuItem icon={<TicketPercent size={14} />} onClick={() => { close(); toast('New coupon') }}>Coupon</MenuItem>
               <MenuItem icon={<Megaphone size={14} />} onClick={() => { close(); toast('New campaign') }}>Campaign</MenuItem>
-              <MenuItem icon={<UserPlus size={14} />} onClick={() => { close(); toast('Invite teammate') }}>Invite teammate</MenuItem>
+              {isOwner && <MenuItem icon={<UserPlus size={14} />} onClick={() => { close(); navigate('/team') }}>Invite teammate</MenuItem>}
             </>
           )}
         </Menu>

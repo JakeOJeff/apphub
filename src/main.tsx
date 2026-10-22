@@ -10,6 +10,7 @@ import { AttributionTab, CampaignsTab, CouponsTab, DataSetupTab, DeepLinksTab, R
 import { PlaceholderPage } from './pages/Placeholder'
 import { AppsPage } from './pages/Apps'
 import { DatabasePage } from './pages/DatabasePage'
+import { TeamPage } from './pages/Team'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -29,6 +30,7 @@ createRoot(document.getElementById('root')!).render(
             </Route>
             <Route path="apps" element={<AppsPage />} />
             <Route path="database" element={<DatabasePage />} />
+            <Route path="team" element={<TeamPage />} />
             <Route path="*" element={<PlaceholderPage />} />
           </Route>
         </Routes>

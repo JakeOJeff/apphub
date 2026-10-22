@@ -18,7 +18,7 @@ const growthTabs = [
 ] as const
 
 export function CommandPalette() {
-  const { paletteOpen, setPaletteOpen, setAiOpen, toggleTheme, setAppEditor } = useAppState()
+  const { paletteOpen, setPaletteOpen, setAiOpen, toggleTheme, setAppEditor, isOwner } = useAppState()
   const navigate = useNavigate()
   const [q, setQ] = useState('')
   const [active, setActive] = useState(0)
@@ -27,13 +27,18 @@ export function CommandPalette() {
     const base = [
       ...allNav.map((n) => ({ label: n.label, group: 'Go to', run: () => navigate(n.to) })),
       ...growthTabs.map(([l, to]) => ({ label: `Growth → ${l}`, group: 'Go to', run: () => navigate(to) })),
-      { label: 'Add app', group: 'Actions', run: () => setAppEditor('new') },
+      ...(isOwner
+        ? [
+            { label: 'Add app', group: 'Actions', run: () => setAppEditor('new') },
+            { label: 'Team & access', group: 'Go to', run: () => navigate('/team') },
+          ]
+        : []),
       { label: 'Toggle light / dark theme', group: 'Actions', run: toggleTheme },
     ]
     const filtered = base.filter((i) => i.label.toLowerCase().includes(q.toLowerCase()))
     if (q.trim()) filtered.push({ label: `Ask Pyn AI: "${q}"`, group: 'AI', run: () => setAiOpen(true) })
     return filtered
-  }, [q, navigate, toggleTheme, setAiOpen, setAppEditor])
+  }, [q, navigate, toggleTheme, setAiOpen, setAppEditor, isOwner])
 
   useEffect(() => {
     if (paletteOpen) {

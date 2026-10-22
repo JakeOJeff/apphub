@@ -10,7 +10,7 @@ import { connectionBadge } from './Apps'
 const AUTH_USERS = '__auth_users__'
 
 export function DatabasePage() {
-  const { app, setAppEditor, recheckApp, toast } = useAppState()
+  const { app, setAppEditor, recheckApp, toast, isOwner, canEdit } = useAppState()
   const server = app.server
   const tables = server?.lastCheck?.tables ?? []
   const [filter, setFilter] = useState('')
@@ -73,7 +73,7 @@ export function DatabasePage() {
         </p>
       </div>
       {server && (
-        <Button onClick={refreshTables} disabled={refreshing}>
+        <Button onClick={refreshTables} disabled={refreshing || !canEdit(app.id)}>
           {refreshing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Refresh tables
         </Button>
       )}
@@ -88,7 +88,7 @@ export function DatabasePage() {
           <EmptyBlock
             title={`${app.name} is a demo app`}
             body="Demo apps use generated numbers and have no database. Add your own app with its Supabase sources to browse real data."
-            action={<Button variant="primary" onClick={() => setAppEditor('new')}>Add app</Button>}
+            action={isOwner ? <Button variant="primary" onClick={() => setAppEditor('new')}>Add app</Button> : undefined}
           />
         </div>
       </div>

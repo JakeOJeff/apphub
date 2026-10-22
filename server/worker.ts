@@ -4,10 +4,11 @@ import { createApi, type AppStore, type StoredApp } from './app.ts'
 type Bindings = {
   DB: D1Database
   ASSETS: Fetcher
-  /** Secrets (wrangler secret put). */
+  /** Public vars (wrangler.jsonc). */
+  SUPABASE_URL: string
+  SUPABASE_PUBLISHABLE_KEY: string
+  /** Secret (wrangler secret put). */
   ENCRYPTION_KEY: string
-  ADMIN_PASSWORD: string
-  SESSION_SECRET: string
 }
 
 function d1Store(db: D1Database): AppStore {
@@ -29,13 +30,13 @@ function d1Store(db: D1Database): AppStore {
 
 const api = createApi((c) => {
   const env = c.env as Bindings
-  if (!env.ENCRYPTION_KEY || !env.ADMIN_PASSWORD || !env.SESSION_SECRET) throw new Error('Missing Worker secrets: ENCRYPTION_KEY, ADMIN_PASSWORD, SESSION_SECRET')
+  if (!env.ENCRYPTION_KEY) throw new Error('Missing Worker secret: ENCRYPTION_KEY')
+  if (!env.SUPABASE_URL || !env.SUPABASE_PUBLISHABLE_KEY) throw new Error('Missing SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY vars')
   return {
     store: d1Store(env.DB),
     encryptionKey: env.ENCRYPTION_KEY,
-    auth: { password: env.ADMIN_PASSWORD, sessionSecret: env.SESSION_SECRET },
+    auth: { supabaseUrl: env.SUPABASE_URL, supabaseKey: env.SUPABASE_PUBLISHABLE_KEY },
     allowedHosts: null,
-    secureCookies: true,
   }
 })
 

@@ -17,6 +17,7 @@
     "@supabase/supabase-js": "^2.118.0",
     "@tailwindcss/vite": "^4.3.3",
     "hono": "^4.13.13",
+    "jose": "^6.2.13",
     "lucide-react": "^1.59.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
