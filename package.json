@@ -9,8 +9,8 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "start": "node --env-file-if-exists=.env.local --import tsx server/index.ts",
-    "cf:dev": "npm run build && wrangler d1 migrations apply apphub --local && wrangler dev",
-    "deploy": "npm run build && wrangler d1 migrations apply apphub --remote && wrangler deploy"
+    "cf:dev": "npm run build && wrangler dev",
+    "deploy": "npm run build && wrangler deploy"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.5",

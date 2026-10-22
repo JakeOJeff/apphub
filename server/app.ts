@@ -5,8 +5,9 @@ import { Hono, type Context } from 'hono'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { mask, normalizeUrl, providers, requiredPassed, type CheckReport, type PublicSources, type ServerApp, type SourcesInput } from '../src/shared/sources.ts'
 import { runChecks } from './checks.ts'
-import { AuthError, canEdit, canView, localOwner, rpc, viewerFromToken, type AuthConfig, type Viewer } from './auth.ts'
+import { AuthError, canEdit, canView, localOwner, viewerFromToken, type AuthConfig, type Viewer } from './auth.ts'
 import { decrypt, encrypt } from './crypto.ts'
+import { supabaseStore } from './supabaseStore.ts'
 
 export type StoredApp = {
   id: string
@@ -27,7 +28,8 @@ export type AppStore = {
 }
 
 export type Deps = {
-  store: AppStore
+  /** Where apps live when sign-in is off (local). With sign-in on, apps live in apphub's Supabase. */
+  localStore: AppStore | null
   /** Base64 32-byte AES key. */
   encryptionKey: string
   /** When set, every API call needs a Supabase Auth access token (Authorization: Bearer). Null = no login, full access. */
@@ -36,7 +38,7 @@ export type Deps = {
   allowedHosts: Set<string> | null
 }
 
-type Env = { Variables: { deps: Deps; viewer: Viewer } }
+type Env = { Variables: { deps: Deps; viewer: Viewer; store: AppStore } }
 
 const PAGE = 25
 
@@ -66,13 +68,16 @@ export function createApi(getDeps: (c: Context) => Deps | Promise<Deps>) {
   api.use('*', async (c, next) => {
     const { auth } = c.get('deps')
     if (!auth) {
+      if (!c.get('deps').localStore) throw new Error('No app store: set localStore when auth is off')
       c.set('viewer', localOwner)
+      c.set('store', c.get('deps').localStore!)
       return next()
     }
     const token = c.req.header('authorization')?.match(/^Bearer (.+)$/)?.[1]
     if (!token) return c.json({ error: 'Sign in required' }, 401)
     try {
       c.set('viewer', await viewerFromToken(auth, token))
+      c.set('store', supabaseStore(auth, token))
     } catch (e) {
       if (e instanceof AuthError) return c.json({ error: e.message }, e.status)
       throw e
@@ -116,7 +121,7 @@ export function createApi(getDeps: (c: Context) => Deps | Promise<Deps>) {
 
   api.get('/apps', async (c) => {
     const viewer = c.get('viewer')
-    const apps = (await c.get('deps').store.list()).filter((a) => canView(viewer, a.id))
+    const apps = (await c.get('store').list()).filter((a) => canView(viewer, a.id))
     return c.json(await Promise.all(apps.map((a) => toPublic(c, a))))
   })
 
@@ -124,7 +129,7 @@ export function createApi(getDeps: (c: Context) => Deps | Promise<Deps>) {
   api.post('/apps/check', async (c) => {
     const body = (await c.req.json()) as { sources: SourcesInput; appId?: string }
     if (body.appId ? !canEdit(c.get('viewer'), body.appId) : !owner(c)) return forbidden(c)
-    const saved = body.appId ? await c.get('deps').store.get(body.appId) : undefined
+    const saved = body.appId ? await c.get('store').get(body.appId) : undefined
     const sources = saved ? merge(await open(c, saved), body.sources) : clean(body.sources)
     return c.json(await runChecks(sources))
   })
@@ -145,13 +150,13 @@ export function createApi(getDeps: (c: Context) => Deps | Promise<Deps>) {
       sources: await seal(c, sources),
       lastCheck: report,
     }
-    await c.get('deps').store.put(app)
+    await c.get('store').put(app)
     return c.json(await toPublic(c, app), 201)
   })
 
   api.patch('/apps/:id', async (c) => {
     if (!canEdit(c.get('viewer'), c.req.param('id'))) return forbidden(c)
-    const { store } = c.get('deps')
+    const store = c.get('store')
     const current = await store.get(c.req.param('id'))
     if (!current) return c.json({ error: 'Not found' }, 404)
     const body = (await c.req.json()) as Partial<{ name: string; color: string; platforms: string; sources: SourcesInput }>
@@ -172,16 +177,14 @@ export function createApi(getDeps: (c: Context) => Deps | Promise<Deps>) {
 
   api.delete('/apps/:id', async (c) => {
     if (!owner(c)) return forbidden(c)
-    const { store, auth } = c.get('deps')
-    await store.delete(c.req.param('id'))
-    if (auth) await rpc(auth, c.get('viewer').token, 'forget_app', { target_app: c.req.param('id') })
+    await c.get('store').delete(c.req.param('id')) // access rows and invites cascade
     return c.body(null, 204)
   })
 
   /** Re-run checks with the saved sources. */
   api.post('/apps/:id/check', async (c) => {
     if (!canEdit(c.get('viewer'), c.req.param('id'))) return forbidden(c)
-    const { store } = c.get('deps')
+    const store = c.get('store')
     const a = await store.get(c.req.param('id'))
     if (!a) return c.json({ error: 'Not found' }, 404)
     a.lastCheck = await runChecks(await open(c, a))
@@ -193,7 +196,7 @@ export function createApi(getDeps: (c: Context) => Deps | Promise<Deps>) {
 
   api.get('/apps/:id/tables/:table', async (c) => {
     if (!canView(c.get('viewer'), c.req.param('id'))) return forbidden(c)
-    const a = await c.get('deps').store.get(c.req.param('id'))
+    const a = await c.get('store').get(c.req.param('id'))
     if (!a) return c.json({ error: 'Not found' }, 404)
     const table = c.req.param('table')
     if (!/^[A-Za-z0-9_]+$/.test(table)) return c.json({ error: 'Invalid table name' }, 400)
@@ -209,7 +212,7 @@ export function createApi(getDeps: (c: Context) => Deps | Promise<Deps>) {
 
   api.get('/apps/:id/auth-users', async (c) => {
     if (!canView(c.get('viewer'), c.req.param('id'))) return forbidden(c)
-    const a = await c.get('deps').store.get(c.req.param('id'))
+    const a = await c.get('store').get(c.req.param('id'))
     if (!a) return c.json({ error: 'Not found' }, 404)
     const page = Math.max(0, Number(c.req.query('page') ?? 0) || 0)
     const { data, error } = await adminClient(a.id, await open(c, a)).auth.admin.listUsers({ page: page + 1, perPage: PAGE })
