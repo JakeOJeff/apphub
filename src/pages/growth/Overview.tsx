@@ -38,10 +38,12 @@ import { useAppState } from '../../state/AppState'
 import { compact, cn, money, pct } from '../../lib/format'
 import { Badge, Button, Card, CardHeader, Chip, Delta, Drawer, SectionLabel } from '../../components/ui'
 import { AreaChart, BarList, FunnelBars, Sparkline } from '../../components/charts'
+import { LiveOverview } from './LiveOverview'
 
 export function GrowthOverview() {
   const { app, range } = useAppState()
   const g = useMemo(() => getGrowth(app, range), [app, range])
+  if (!app.demo) return <LiveOverview />
 
   return (
     <div className="space-y-6">

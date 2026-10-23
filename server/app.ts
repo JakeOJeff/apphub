@@ -8,6 +8,10 @@ import { runChecks } from './checks.ts'
 import { AuthError, canEdit, canView, localOwner, viewerFromToken, type AuthConfig, type Viewer } from './auth.ts'
 import { decrypt, encrypt } from './crypto.ts'
 import { supabaseStore } from './supabaseStore.ts'
+import { AppData, filterQuery } from './appData.ts'
+import { detect, validateMapping } from './mapping.ts'
+import { computeMetric } from './metrics.ts'
+import { describeMap, emptyMapping, ident, listDefs, metricDefs, resolveList, resolveMetric, type Detected, type ListKey, type Mapping, type MetricKey, type Range } from '../src/shared/metrics.ts'
 
 export type StoredApp = {
   id: string
@@ -18,6 +22,10 @@ export type StoredApp = {
   /** Encrypted JSON of SourcesInput. */
   sources: string
   lastCheck?: CheckReport
+  /** Tables mapped to Growth metrics by hand; missing keys fall back to `detected`. */
+  mapping?: Mapping
+  /** What detection found at the last check. */
+  detected?: Detected
 }
 
 export type AppStore = {
@@ -44,6 +52,7 @@ const PAGE = 25
 
 export function createApi(getDeps: (c: Context) => Deps | Promise<Deps>) {
   const api = new Hono<Env>().basePath('/api')
+  api.onError((e, c) => c.json({ error: e.message || 'Server error' }, 500))
 
   api.use('*', async (c, next) => {
     const deps = await getDeps(c)
@@ -149,6 +158,7 @@ export function createApi(getDeps: (c: Context) => Deps | Promise<Deps>) {
       createdAt: new Date().toISOString(),
       sources: await seal(c, sources),
       lastCheck: report,
+      detected: await detectFor(sources),
     }
     await c.get('store').put(app)
     return c.json(await toPublic(c, app), 201)
@@ -170,6 +180,7 @@ export function createApi(getDeps: (c: Context) => Deps | Promise<Deps>) {
       if (!requiredPassed(report)) return c.json({ error: 'Supabase sources failed their checks', report }, 422)
       next.sources = await seal(c, sources)
       next.lastCheck = report
+      next.detected = (await detectFor(sources)) ?? next.detected
     }
     await store.put(next)
     return c.json(await toPublic(c, next))
@@ -187,7 +198,9 @@ export function createApi(getDeps: (c: Context) => Deps | Promise<Deps>) {
     const store = c.get('store')
     const a = await store.get(c.req.param('id'))
     if (!a) return c.json({ error: 'Not found' }, 404)
-    a.lastCheck = await runChecks(await open(c, a))
+    const sources = await open(c, a)
+    a.lastCheck = await runChecks(sources)
+    if (requiredPassed(a.lastCheck)) a.detected = (await detectFor(sources)) ?? a.detected
     await store.put(a)
     return c.json(await toPublic(c, a))
   })
@@ -228,7 +241,105 @@ export function createApi(getDeps: (c: Context) => Deps | Promise<Deps>) {
     return c.json({ rows, count: (data as { total?: number }).total || (a.lastCheck?.authUsers ?? null), pageSize: PAGE })
   })
 
+  // ---------- Growth mapping: which tables feed which metrics ----------
+
+  /** The app, if the viewer may see it, with a reader for its Supabase. */
+  async function appFor(c: Context<Env>, edit = false) {
+    const id = c.req.param('id')!
+    if (!(edit ? canEdit : canView)(c.get('viewer'), id)) return null
+    const a = await c.get('store').get(id)
+    return a ? { a, db: new AppData(await open(c, a)) } : null
+  }
+
+  api.get('/apps/:id/mapping', async (c) => {
+    const found = await appFor(c)
+    if (!found) return c.json({ error: 'Not found' }, 404)
+    const { a, db } = found
+    const tables = await db.schema()
+    if (!a.detected) {
+      a.detected = await detect(db, tables)
+      if (canEdit(c.get('viewer'), a.id)) await c.get('store').put(a)
+    }
+    return c.json({ tables, detected: a.detected, saved: a.mapping ?? emptyMapping() })
+  })
+
+  api.post('/apps/:id/mapping/detect', async (c) => {
+    const found = await appFor(c, true)
+    if (!found) return forbidden(c)
+    const { a, db } = found
+    const tables = await db.schema()
+    a.detected = await detect(db, tables)
+    await c.get('store').put(a)
+    return c.json({ tables, detected: a.detected, saved: a.mapping ?? emptyMapping() })
+  })
+
+  api.put('/apps/:id/mapping', async (c) => {
+    const found = await appFor(c, true)
+    if (!found) return forbidden(c)
+    const { a, db } = found
+    const body = (await c.req.json()) as Mapping
+    const mapping: Mapping = { metrics: {}, lists: {} }
+    for (const d of metricDefs) if (body.metrics && d.key in body.metrics) mapping.metrics[d.key] = body.metrics[d.key] ?? null
+    for (const d of listDefs) if (body.lists && d.key in body.lists) mapping.lists[d.key] = body.lists[d.key] ?? null
+    const tables = await db.schema()
+    const err = validateMapping(mapping, tables)
+    if (err) return c.json({ error: err }, 400)
+    a.mapping = mapping
+    await c.get('store').put(a)
+    return c.json({ tables, detected: a.detected, saved: mapping })
+  })
+
+  /** Distinct values of a column (sampled), for filter and price pickers. */
+  api.get('/apps/:id/values', async (c) => {
+    const found = await appFor(c)
+    if (!found) return c.json({ error: 'Not found' }, 404)
+    const table = c.req.query('table') ?? ''
+    const column = c.req.query('column') ?? ''
+    if (!ident.test(table) || !ident.test(column)) return c.json({ error: 'Invalid table or column' }, 400)
+    try {
+      return c.json(await found.db.values(table, column))
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400)
+    }
+  })
+
+  api.get('/apps/:id/metrics/:key', async (c) => {
+    const found = await appFor(c)
+    if (!found) return c.json({ error: 'Not found' }, 404)
+    const key = c.req.param('key') as MetricKey
+    if (!metricDefs.some((d) => d.key === key)) return c.json({ error: 'Unknown metric' }, 400)
+    const range = (['today', '7d', '30d', '90d', 'custom'].includes(c.req.query('range') ?? '') ? c.req.query('range') : '30d') as Range
+    const { map, source } = resolveMetric(key, found.a.mapping, found.a.detected)
+    if (!map) return c.json({ status: 'off' })
+    return c.json({ ...(await computeMetric(found.db, map, range)), source: describeMap(map), mappedBy: source })
+  })
+
+  api.get('/apps/:id/lists/:key', async (c) => {
+    const found = await appFor(c)
+    if (!found) return c.json({ error: 'Not found' }, 404)
+    const key = c.req.param('key') as ListKey
+    if (!listDefs.some((d) => d.key === key)) return c.json({ error: 'Unknown list' }, 400)
+    const { map } = resolveList(key, found.a.mapping, found.a.detected)
+    if (!map) return c.json({ status: 'off' })
+    const page = Math.max(0, Number(c.req.query('page') ?? 0) || 0)
+    try {
+      const { rows, count } = await found.db.page(map.table, filterQuery(map.filters), page, PAGE)
+      return c.json({ status: 'ok', table: map.table, rows, count, pageSize: PAGE })
+    } catch (e) {
+      return c.json({ status: 'error', detail: (e as Error).message })
+    }
+  })
+
   return api
+}
+
+async function detectFor(sources: SourcesInput) {
+  try {
+    const db = new AppData(sources)
+    return await detect(db, await db.schema())
+  } catch {
+    return undefined
+  }
 }
 
 // ---------- source helpers ----------

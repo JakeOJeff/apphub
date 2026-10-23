@@ -29,35 +29,45 @@ export function GrowthLayout() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Segmented value={range} onChange={setRange} options={ranges} />
-          <Button onClick={() => toast('Exporting CSV…')}>
-            <Download size={14} /> Export
-          </Button>
-          <Menu
-            width="w-48"
-            trigger={({ toggle }) => (
-              <Button variant="primary" onClick={toggle}>
-                <Plus size={14} /> Create <ChevronDown size={13} />
+          {app.demo && (
+            <>
+              <Button onClick={() => toast('Exporting CSV…')}>
+                <Download size={14} /> Export
               </Button>
-            )}
-          >
-            {(close) => (
-              <>
-                <MenuItem icon={<Link2 size={14} />} onClick={() => { close(); toast('New deep link') }}>Deep link</MenuItem>
-                <MenuItem icon={<TicketPercent size={14} />} onClick={() => { close(); toast('New coupon') }}>Coupon</MenuItem>
-                <MenuItem icon={<Users size={14} />} onClick={() => { close(); toast('New referral program') }}>Referral program</MenuItem>
-                <MenuItem icon={<Megaphone size={14} />} onClick={() => { close(); toast('New campaign') }}>Campaign</MenuItem>
-              </>
-            )}
-          </Menu>
+              <Menu
+                width="w-48"
+                trigger={({ toggle }) => (
+                  <Button variant="primary" onClick={toggle}>
+                    <Plus size={14} /> Create <ChevronDown size={13} />
+                  </Button>
+                )}
+              >
+                {(close) => (
+                  <>
+                    <MenuItem icon={<Link2 size={14} />} onClick={() => { close(); toast('New deep link') }}>Deep link</MenuItem>
+                    <MenuItem icon={<TicketPercent size={14} />} onClick={() => { close(); toast('New coupon') }}>Coupon</MenuItem>
+                    <MenuItem icon={<Users size={14} />} onClick={() => { close(); toast('New referral program') }}>Referral program</MenuItem>
+                    <MenuItem icon={<Megaphone size={14} />} onClick={() => { close(); toast('New campaign') }}>Campaign</MenuItem>
+                  </>
+                )}
+              </Menu>
+            </>
+          )}
         </div>
       </div>
 
+      {app.demo && (
+        <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-card-2 px-3 py-2 text-xs text-muted">
+          <Database size={13} className="text-subtle" />
+          Sample app: every number here is generated.
+        </div>
+      )}
       {!app.demo && (
         <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-card-2 px-3 py-2 text-xs text-muted">
           <Database size={13} className="text-subtle" />
-          Data sources are connected. These metrics are still placeholders until your tables are mapped to them.
-          <Link to="/database" className="ml-auto font-medium text-fg hover:underline">
-            Browse tables →
+          Numbers come straight from {app.name}’s Supabase tables. Anything not mapped shows as not connected.
+          <Link to="/growth/setup" className="ml-auto font-medium text-fg hover:underline">
+            Data mapping →
           </Link>
         </div>
       )}

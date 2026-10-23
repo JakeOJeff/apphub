@@ -6,7 +6,8 @@ import { Button, Menu, MenuItem } from '../ui'
 import { allNav } from './nav'
 
 export function Topbar({ onOpenNav }: { onOpenNav: () => void }) {
-  const { theme, toggleTheme, setPaletteOpen, setAppEditor, toast, isOwner } = useAppState()
+  const { theme, toggleTheme, setPaletteOpen, setAppEditor, toast, isOwner, app } = useAppState()
+  const shown = app.demo ? notifications : []
   const { pathname } = useLocation()
   const navigate = useNavigate()
   const crumb = allNav.find((n) => pathname.startsWith(n.to))?.label ?? (pathname.startsWith('/team') ? 'Team' : 'Home')
@@ -54,7 +55,7 @@ export function Topbar({ onOpenNav }: { onOpenNav: () => void }) {
           trigger={({ toggle }) => (
             <Button variant="secondary" size="icon" onClick={toggle} aria-label="Notifications" className="relative">
               <Bell size={15} />
-              <span className="absolute top-1.5 right-1.5 h-1.5 w-1.5 rounded-full bg-red-500" />
+              {shown.length > 0 && <span className="absolute top-1.5 right-1.5 h-1.5 w-1.5 rounded-full bg-red-500" />}
             </Button>
           )}
         >
@@ -66,7 +67,8 @@ export function Topbar({ onOpenNav }: { onOpenNav: () => void }) {
                   Mark all read
                 </button>
               </div>
-              {notifications.map((n) => (
+              {shown.length === 0 && <div className="px-2 py-6 text-center text-xs text-subtle">No notifications yet.</div>}
+              {shown.map((n) => (
                 <button key={n.id} onClick={close} className="block w-full cursor-pointer rounded-md px-2 py-2 text-left hover:bg-hover">
                   <div className="flex items-baseline justify-between gap-2">
                     <span className="text-[13px] font-medium">{n.title}</span>

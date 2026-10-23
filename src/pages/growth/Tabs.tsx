@@ -5,6 +5,34 @@ import { useAppState } from '../../state/AppState'
 import { compact, cn, money, pct } from '../../lib/format'
 import { Badge, Button, Card, CardHeader, Chip, Field, inputCls, Menu, MenuItem, Modal, Segmented, SectionLabel, Toggle } from '../../components/ui'
 import { BarList } from '../../components/charts'
+import { LiveAttribution, LiveList } from './LiveTabs'
+import { MappingSetup } from './MappingSetup'
+
+// Real apps get live views (LiveTabs, MappingSetup); demo apps keep the sample data below.
+
+export function DeepLinksTab() {
+  return useAppState().app.demo ? <DemoDeepLinksTab /> : <LiveList k="links" />
+}
+
+export function CouponsTab() {
+  return useAppState().app.demo ? <DemoCouponsTab /> : <LiveList k="coupons" />
+}
+
+export function ReferralsTab() {
+  return useAppState().app.demo ? <DemoReferralsTab /> : <LiveList k="referrals" />
+}
+
+export function CampaignsTab() {
+  return useAppState().app.demo ? <DemoCampaignsTab /> : <LiveList k="campaigns" />
+}
+
+export function AttributionTab() {
+  return useAppState().app.demo ? <DemoAttributionTab /> : <LiveAttribution />
+}
+
+export function DataSetupTab() {
+  return useAppState().app.demo ? <DemoDataSetupTab /> : <MappingSetup />
+}
 
 // ---------- shared table ----------
 
@@ -57,7 +85,7 @@ function RowMenu({ actions }: { actions: { label: string; run: () => void }[] })
 const linkStatusTone = { active: 'green', broken: 'red', expiring: 'amber', paused: 'neutral' } as const
 const sources = ['All', 'Recipe', 'Campaign', 'Creator', 'Referral', 'QR', 'Manual'] as const
 
-export function DeepLinksTab() {
+function DemoDeepLinksTab() {
   const { toast } = useAppState()
   const [rows, setRows] = useState<LinkRow[]>(linkRows)
   const [q, setQ] = useState('')
@@ -172,7 +200,7 @@ export function DeepLinksTab() {
 
 const couponTone = { live: 'green', scheduled: 'blue', ended: 'neutral' } as const
 
-export function CouponsTab() {
+function DemoCouponsTab() {
   const { toast } = useAppState()
   const [rows, setRows] = useState<CouponRow[]>(couponRows)
   const [enabled, setEnabled] = useState<Record<string, boolean>>(() => Object.fromEntries(couponRows.map((c) => [c.code, c.status !== 'ended'])))
@@ -233,7 +261,7 @@ function StoreDot({ ok, label, icon }: { ok: boolean; label: string; icon: React
 
 // ---------- Referrals ----------
 
-export function ReferralsTab() {
+function DemoReferralsTab() {
   const { toast } = useAppState()
   const [program, setProgram] = useState({ enabled: true, giver: '1 month free', receiver: '30% off first year', fraud: true })
 
@@ -288,7 +316,7 @@ export function ReferralsTab() {
 
 // ---------- Campaigns ----------
 
-export function CampaignsTab() {
+function DemoCampaignsTab() {
   const { toast } = useAppState()
   const [status, setStatus] = useState<'all' | 'active' | 'paused' | 'ended'>('all')
   const [paused, setPaused] = useState<string[]>([])
@@ -358,7 +386,7 @@ const channels = [
   { label: 'Paid social', base: 990 },
 ]
 
-export function AttributionTab() {
+function DemoAttributionTab() {
   const [model, setModel] = useState<'first' | 'last' | 'linear'>('last')
   const [windowDays, setWindowDays] = useState<'7' | '30' | '90'>('30')
 
@@ -408,7 +436,7 @@ export function AttributionTab() {
 
 // ---------- Data & setup ----------
 
-export function DataSetupTab() {
+function DemoDataSetupTab() {
   const { toast } = useAppState()
   const [conns, setConns] = useState([
     { name: 'App Store Server Notifications', ok: true, meta: 'v2 · last event 2m ago' },

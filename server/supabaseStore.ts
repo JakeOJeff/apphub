@@ -1,10 +1,21 @@
 // Apps in apphub's Supabase (public.apps), read and written as the signed-in user so RLS applies.
 import { createClient } from '@supabase/supabase-js'
 import type { CheckReport } from '../src/shared/sources.ts'
+import type { Detected, Mapping } from '../src/shared/metrics.ts'
 import type { AppStore, StoredApp } from './app.ts'
 import type { AuthConfig } from './auth.ts'
 
-type Row = { id: string; name: string; color: string; platforms: string; sources: string; last_check: CheckReport | null; created_at: string }
+type Row = {
+  id: string
+  name: string
+  color: string
+  platforms: string
+  sources: string
+  last_check: CheckReport | null
+  mapping: Mapping | null
+  detected: Detected | null
+  created_at: string
+}
 
 const fromRow = (r: Row): StoredApp => ({
   id: r.id,
@@ -14,6 +25,8 @@ const fromRow = (r: Row): StoredApp => ({
   createdAt: r.created_at,
   sources: r.sources,
   lastCheck: r.last_check ?? undefined,
+  mapping: r.mapping ?? undefined,
+  detected: r.detected ?? undefined,
 })
 
 const toRow = (a: StoredApp): Row => ({
@@ -24,6 +37,8 @@ const toRow = (a: StoredApp): Row => ({
   created_at: a.createdAt,
   sources: a.sources,
   last_check: a.lastCheck ?? null,
+  mapping: a.mapping ?? null,
+  detected: a.detected ?? null,
 })
 
 export function supabaseStore(cfg: AuthConfig, token: string): AppStore {

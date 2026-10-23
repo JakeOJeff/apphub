@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { demoApps, type AppInfo, type RangeKey } from '../data/mock'
 import { api, ApiError, type AppFields, type Me } from '../lib/api'
 import { authClient } from '../lib/auth'
+import { forgetMetrics } from '../lib/metrics'
 import type { ServerApp, SourcesInput } from '../shared/sources'
 
 type Toast = { id: number; message: string }
@@ -30,6 +31,9 @@ type State = {
   setAppEditor: (v: string | null) => void
   range: RangeKey
   setRange: (r: RangeKey) => void
+  /** Bumped when an app's mapping or sources change, so metric views refetch. */
+  mappingVersion: number
+  mappingChanged: (appId: string) => void
   theme: 'dark' | 'light'
   toggleTheme: () => void
   toasts: Toast[]
@@ -72,6 +76,11 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [appEditor, setAppEditor] = useState<string | null>(null)
   const [appId, setAppIdRaw] = useState<string>(() => load('pyn.app', 'goumi'))
   const [range, setRange] = useState<RangeKey>('30d')
+  const [mappingVersion, setMappingVersion] = useState(0)
+  const mappingChanged = useCallback((id: string) => {
+    forgetMetrics(id)
+    setMappingVersion((v) => v + 1)
+  }, [])
   const [theme, setTheme] = useState<'dark' | 'light'>(() => load('pyn.theme', 'dark'))
   const [toasts, setToasts] = useState<Toast[]>([])
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -151,8 +160,15 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const createApp = useCallback(async (fields: AppFields & { sources: SourcesInput }) => upsert(await api.createApp(fields)), [upsert])
-  const saveApp = useCallback(async (id: string, patch: Partial<AppFields> & { sources?: SourcesInput }) => { upsert(await api.updateApp(id, patch)) }, [upsert])
-  const recheckApp = useCallback(async (id: string) => upsert(await api.recheck(id)), [upsert])
+  const saveApp = useCallback(async (id: string, patch: Partial<AppFields> & { sources?: SourcesInput }) => {
+    upsert(await api.updateApp(id, patch))
+    if (patch.sources) mappingChanged(id)
+  }, [upsert, mappingChanged])
+  const recheckApp = useCallback(async (id: string) => {
+    const a = upsert(await api.recheck(id))
+    mappingChanged(id)
+    return a
+  }, [upsert, mappingChanged])
   const deleteApp = useCallback(async (id: string) => {
     await api.deleteApp(id)
     setServerApps((list) => list.filter((x) => x.id !== id))
@@ -208,6 +224,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       setAppEditor,
       range,
       setRange,
+      mappingVersion,
+      mappingChanged,
       theme,
       toggleTheme: () => setTheme((t) => (t === 'dark' ? 'light' : 'dark')),
       toasts,
@@ -217,7 +235,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       aiOpen,
       setAiOpen,
     }),
-    [apps, appId, auth, me, isOwner, canEdit, signOut, setAppId, appsError, appsLoaded, createApp, saveApp, deleteApp, recheckApp, hideDemo, appEditor, range, theme, toasts, toast, paletteOpen, aiOpen],
+    [apps, appId, auth, me, isOwner, canEdit, signOut, setAppId, appsError, appsLoaded, createApp, saveApp, deleteApp, recheckApp, hideDemo, appEditor, range, mappingVersion, mappingChanged, theme, toasts, toast, paletteOpen, aiOpen],
   )
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

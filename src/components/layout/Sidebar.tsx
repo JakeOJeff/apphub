@@ -92,13 +92,13 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       <nav className="flex-1 overflow-y-auto px-3 pt-1 pb-3">
         <div className="space-y-0.5">
           {mainNav.map((item) => (
-            <NavRow key={item.to} item={item} onNavigate={onNavigate} />
+            <NavRow key={item.to} item={app.demo ? item : { ...item, badge: undefined }} onNavigate={onNavigate} />
           ))}
         </div>
         <div className="mt-5 mb-1.5 px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-subtle">Content</div>
         <div className="space-y-0.5">
           {contentNav.map((item) => (
-            <NavRow key={item.to} item={item} onNavigate={onNavigate} />
+            <NavRow key={item.to} item={app.demo ? item : { ...item, badge: undefined }} onNavigate={onNavigate} />
           ))}
         </div>
       </nav>

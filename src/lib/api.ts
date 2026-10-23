@@ -1,5 +1,6 @@
 import type { CheckReport, ServerApp, SourcesInput } from '../shared/sources'
 import { accessToken } from './auth'
+import type { ListKey, Mapping, MappingState, MetricKey, MetricResult, Range } from '../shared/metrics'
 
 export class ApiError extends Error {
   status: number
@@ -32,6 +33,7 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
 
 export type AppFields = { name: string; color: string; platforms: string }
 export type Me = { id: string; email: string; role: 'owner' | 'member'; apps: Record<string, 'editor' | 'viewer'> }
+export type ListResult = { status: 'off' } | { status: 'error'; detail: string } | ({ status: 'ok'; table: string } & Rows)
 export type Rows = { rows: Record<string, unknown>[]; count: number | null; pageSize: number }
 
 export const api = {
@@ -44,4 +46,11 @@ export const api = {
   recheck: (id: string) => req<ServerApp>('POST', `/apps/${id}/check`),
   tableRows: (id: string, table: string, page: number) => req<Rows>('GET', `/apps/${id}/tables/${encodeURIComponent(table)}?page=${page}`),
   authUsers: (id: string, page: number) => req<Rows>('GET', `/apps/${id}/auth-users?page=${page}`),
+  mapping: (id: string) => req<MappingState>('GET', `/apps/${id}/mapping`),
+  detectMapping: (id: string) => req<MappingState>('POST', `/apps/${id}/mapping/detect`),
+  saveMapping: (id: string, mapping: Mapping) => req<MappingState>('PUT', `/apps/${id}/mapping`, mapping),
+  values: (id: string, table: string, column: string) =>
+    req<{ value: string; count: number }[]>('GET', `/apps/${id}/values?table=${encodeURIComponent(table)}&column=${encodeURIComponent(column)}`),
+  metric: (id: string, key: MetricKey, range: Range) => req<MetricResult>('GET', `/apps/${id}/metrics/${key}?range=${range}`),
+  list: (id: string, key: ListKey, page: number) => req<ListResult>('GET', `/apps/${id}/lists/${key}?page=${page}`),
 }
